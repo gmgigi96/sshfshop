@@ -19,3 +19,8 @@ make uninstall
 cd ..
 rm -rf sshfshop
 ```
+
+---
+© 2021 Gianmaria Del Monte
+
+This project is licensed under the [GPLv3](LICENSE) License.
