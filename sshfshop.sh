@@ -18,6 +18,7 @@ sub_mount() {
 
             -h1 | --host1)
                 HOST1=$2
+                USER1=`echo $HOST1 | cut -f1 -d@`
                 shift 2
                 ;;
             -h2 | --host2)
@@ -65,16 +66,35 @@ sub_mount() {
         slot=$(($slot + 1))
     done
 
-    # chose a random port for the local port forwarding
-    LOCAL_PORT=`shuf -i 49152-65535 -n 1`
-    echo $LOCAL_PORT > $DB_DIR/$slot
+
+    # mount on host2 folder on host1 temp folder
+    out_host1=$(ssh -o "StrictHostKeyChecking=no" -p $PORT1 $HOST1 "tmp_dir=\$(mktemp -d) && sshfs -p $PORT2 $USER2@$HOST2:$FOLDER \$tmp_dir && echo \$tmp_dir && hostname")
+    
+    if [ $? -ne 0 ]
+    then
+        echo "Could not mount $USER2@$HOST2:$FOLDER in $HOST1" >&2
+        exit 1
+    fi
+
+    mount_dir_host1=$(echo $out_host1 | awk '{print $1}')
+    name_host1=$(echo $out_host1 | awk '{print $2}')
+
+    echo $mount_dir_host1
+    echo $name_host1
+
+    # mount host1 temp folder in local user folder
+    sshfs -o "StrictHostKeyChecking=no" -p $PORT1 $USER1@$name_host1:$mount_dir_host1 $MOUNT_DIR
+
+    if [ $? -ne 0 ]
+    then
+        echo "Could not mount $USER2@$HOST2:$FOLDER in $MOUNT_DIR" >&2
+        exit 1
+    fi
+
+    echo $USER1@$name_host1 > $DB_DIR/$slot
+    echo $mount_dir_host1 >> $DB_DIR/$slot
     echo "$USER2@$HOST2:$FOLDER" >> $DB_DIR/$slot
     echo `readlink -f $MOUNT_DIR` >> $DB_DIR/$slot
-
-    # create tunnel
-    ssh -L $LOCAL_PORT:$HOST2:$PORT2 $HOST1 -N -f -p $PORT1
-    # mount dir over ssh
-    sshfs -p $LOCAL_PORT $USER2@localhost:$FOLDER $MOUNT_DIR
 
 }
 
@@ -90,17 +110,29 @@ sub_list() {
     fi
 
     for entry in `ls $DB_DIR`; do
-        LOCAL_PORT=`_get_line 1 $DB_DIR/$entry`
-        REMOTE_DIR=`_get_line 2 $DB_DIR/$entry`
-        MOUNT_DIR=`_get_line 3 $DB_DIR/$entry`
+        REMOTE_DIR=`_get_line 3 $DB_DIR/$entry`
+        MOUNT_DIR=`_get_line 4 $DB_DIR/$entry`
         
-        echo "[$entry] $REMOTE_DIR -> $MOUNT_DIR ($LOCAL_PORT)"
+        echo "[$entry] $REMOTE_DIR -> $MOUNT_DIR"
     done
 }
 
-_kill_and_rm() {
-    ps x | grep ssh | grep $1 | grep -v grep | awk '{print $1}' | xargs kill
-    rm -f $2
+# _umount_and_rm <mount_number>
+_umount_and_rm() {
+    mount_number=$1
+
+    # umount local dir
+    local_folder=$(_get_line 4 $DB_DIR/$mount_number)
+    umount $local_folder
+
+    # try to umount on host1
+    host1=$(_get_line 1 $DB_DIR/$mount_number)
+    folder_host1=$(_get_line 2 $DB_DIR/$mount_number)
+    ssh -o "StrictHostKeyChecking=no" $host1 "umount $folder_host1" 2> /dev/null
+
+    # clean in db
+    rm -f $DB_DIR/$mount_number
+
 }
 
 sub_umount() {
@@ -120,11 +152,8 @@ sub_umount() {
         if [ ! -f $DB_DIR/$MOUNT_NUMBER ]; then
             exit 0
         fi
-
-        LOCAL_PORT=`_get_line 1 $DB_DIR/$MOUNT_NUMBER`
-
-        ps x | grep ssh | grep $LOCAL_PORT | grep -v grep | awk '{print $1}' | xargs kill
-        rm -f $DB_DIR/$MOUNT_NUMBER
+    
+        _umount_and_rm $MOUNT_NUMBER        
 
     elif [[ $1 = all ]]; then
 
@@ -141,17 +170,16 @@ sub_umount() {
 
         # find local port used for port forwarding
         for entry in `ls $DB_DIR`; do
-            mount_path=`_get_line 3 $DB_DIR/$entry`
+            mount_path=`_get_line 4 $DB_DIR/$entry`
             if [ $UMOUNT_PATH = $mount_path ]; then
-                LOCAL_PORT=`_get_line 1 $DB_DIR/$entry`
                 MOUNT_NUMBER=$entry
                 break
             fi
         done
 
-        if [ $LOCAL_PORT ]; then
+        if [ $MOUNT_NUMBER ]; then
             # a mount exists
-            _kill_and_rm $LOCAL_PORT $DB_DIR/$MOUNT_NUMBER
+            _umount_and_rm $MOUNT_NUMBER
         fi
 
     fi
