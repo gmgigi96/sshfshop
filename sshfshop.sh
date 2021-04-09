@@ -79,9 +79,6 @@ sub_mount() {
     mount_dir_host1=$(echo $out_host1 | awk '{print $1}')
     name_host1=$(echo $out_host1 | awk '{print $2}')
 
-    echo $mount_dir_host1
-    echo $name_host1
-
     # mount host1 temp folder in local user folder
     sshfs -o "StrictHostKeyChecking=no" -p $PORT1 $USER1@$name_host1:$mount_dir_host1 $MOUNT_DIR
 
