@@ -53,6 +53,12 @@ sub_mount() {
         exit 1
     fi
 
+    # check if the mount dir exists
+    if [ ! -d $MOUNT_DIR ]; then
+        echo -e "Error: \"$MOUNT_DIR\" does not exist.\nPlease select an existing folder"
+        exit 1
+    fi
+
     if [ ! -d $DB_DIR ]; then
         mkdir -p $DB_DIR
     fi
@@ -80,7 +86,7 @@ sub_mount() {
     name_host1=$(echo $out_host1 | awk '{print $2}')
 
     # mount host1 temp folder in local user folder
-    sshfs -o "StrictHostKeyChecking=no" -p $PORT1 $USER1@$name_host1:$mount_dir_host1 $MOUNT_DIR
+    sshfs -o "StrictHostKeyChecking=no" -o reconnect -p $PORT1 $USER1@$name_host1:$mount_dir_host1 $MOUNT_DIR
 
     if [ $? -ne 0 ]
     then
@@ -117,15 +123,26 @@ sub_list() {
 # _umount_and_rm <mount_number>
 _umount_and_rm() {
     mount_number=$1
+    force=$2
 
     # umount local dir
     local_folder=$(_get_line 4 $DB_DIR/$mount_number)
     umount $local_folder
 
+    if test $? -ne 0 -a $force != true; then
+        echo "Local umount error"
+        exit 1
+    fi
+
     # try to umount on host1
     host1=$(_get_line 1 $DB_DIR/$mount_number)
     folder_host1=$(_get_line 2 $DB_DIR/$mount_number)
     ssh -o "StrictHostKeyChecking=no" $host1 "umount $folder_host1" 2> /dev/null
+
+    if test $? -ne 0 -a $force != true; then
+        echo "Remote umount error"
+        exit 1
+    fi
 
     # clean in db
     rm -f $DB_DIR/$mount_number
@@ -139,20 +156,41 @@ sub_umount() {
         exit 1
     fi
 
-    if [[ $1 =~ ^[0-9]+$ ]]; then
+    FORCE=false
+
+    while [[ $# -gt 0 ]]
+    do
+        key="$1"
+
+        case $key in
+
+            -f | --force) # 
+                FORCE=true
+                shift 1
+                ;;
+            *)
+                ARG=$1
+                shift 1
+                ;;
+
+        esac
+
+    done
+
+    if [[ $ARG =~ ^[0-9]+$ ]]; then
 
         # argument is the number of mounting
 
-        MOUNT_NUMBER=$1
+        MOUNT_NUMBER=$ARG
 
         # check if the number selected exists
         if [ ! -f $DB_DIR/$MOUNT_NUMBER ]; then
             exit 0
         fi
     
-        _umount_and_rm $MOUNT_NUMBER        
+        _umount_and_rm $MOUNT_NUMBER $FORCE    
 
-    elif [[ $1 = all ]]; then
+    elif [[ $ARG = all ]]; then
 
         # remove all
         for entry in `ls $DB_DIR`; do
@@ -163,7 +201,7 @@ sub_umount() {
 
         # argument is the path
 
-        UMOUNT_PATH=`readlink -f $1`
+        UMOUNT_PATH=`readlink -f $ARG`
 
         # find local port used for port forwarding
         for entry in `ls $DB_DIR`; do
@@ -176,7 +214,7 @@ sub_umount() {
 
         if [ $MOUNT_NUMBER ]; then
             # a mount exists
-            _umount_and_rm $MOUNT_NUMBER
+            _umount_and_rm $MOUNT_NUMBER $FORCE
         fi
 
     fi
