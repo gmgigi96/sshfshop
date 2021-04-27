@@ -74,7 +74,7 @@ sub_mount() {
 
 
     # mount on host2 folder on host1 temp folder
-    out_host1=$(ssh -o "StrictHostKeyChecking=no" -p $PORT1 $HOST1 "tmp_dir=\$(mktemp -d) && sshfs -p $PORT2 $USER2@$HOST2:$FOLDER \$tmp_dir && echo \$tmp_dir && hostname")
+    out_host1=$(ssh -o "StrictHostKeyChecking=no" -p $PORT1 $HOST1 "tmp_dir=\$(mktemp -d) && sshfs -p $PORT2 -o "StrictHostKeyChecking=no" -o reconnect $USER2@$HOST2:$FOLDER \$tmp_dir && echo \$tmp_dir && hostname")
     
     if [ $? -ne 0 ]
     then
